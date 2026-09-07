@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e91e63"/>
+      <stop offset="100%" style="stop-color:#9c27b0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <!-- Needle -->
+  <path d="M180 120 L280 380 L300 370 L210 120 Z" fill="#fff" opacity="0.95"/>
+  <circle cx="195" cy="110" r="18" fill="#fff"/>
+  <circle cx="195" cy="110" r="8" fill="#e91e63"/>
+  <!-- Thread -->
+  <path d="M210 130 Q260 180 240 230 Q220 280 270 320 Q300 350 290 380" 
+        stroke="#ffeb3b" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <!-- Scissors hint -->
+  <circle cx="340" cy="160" r="28" fill="none" stroke="#fff" stroke-width="10"/>
+  <circle cx="380" cy="200" r="28" fill="none" stroke="#fff" stroke-width="10"/>
+  <path d="M355 175 L365 185" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+  <!-- Text -->
+  <text x="256" y="460" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="bold" fill="#fff">COSTURA</text>
+</svg>
