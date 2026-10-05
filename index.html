@@ -461,7 +461,93 @@ body {
   .wrap { max-width: 520px; margin: 0 auto; }
   .stats { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* —— Photo lightbox —— */
+.lightbox {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
+  padding: 1rem;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.lightbox.show { display: flex; }
+.lightbox img {
+  max-width: 100%;
+  max-height: 78vh;
+  border-radius: 10px;
+  object-fit: contain;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.lightbox .lb-close {
+  position: absolute;
+  top: 12px; right: 14px;
+  background: rgba(20,30,50,0.9);
+  border: 1px solid var(--line);
+  color: var(--text);
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  cursor: pointer;
+  display: grid; place-items: center;
+}
+.thumb {
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.thumb:not(.ph):active { transform: scale(0.96); }
+.thumb:not(.ph):hover { box-shadow: 0 0 0 2px var(--cyan-dim); }
+
+/* —— Motivación toggle —— */
+.motiv-bar {
+  margin: 0 1rem 0.65rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.motiv-bar .lbl { font-size: 0.78rem; color: var(--muted); }
+.motiv-bar .lbl strong { color: var(--mint); font-weight: 600; }
+.switch {
+  position: relative;
+  width: 44px; height: 24px;
+  flex-shrink: 0;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider {
+  position: absolute; inset: 0;
+  background: #1a2a40;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+.switch .slider::before {
+  content: '';
+  position: absolute;
+  width: 18px; height: 18px;
+  left: 2px; top: 2px;
+  background: var(--muted);
+  border-radius: 50%;
+  transition: 0.2s;
+}
+.switch input:checked + .slider {
+  background: #0a2a28;
+  border-color: var(--ok);
+}
+.switch input:checked + .slider::before {
+  transform: translateX(20px);
+  background: var(--mint);
+}
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -602,6 +688,13 @@ body {
         <button type="button" class="btn btn-ghost" id="btnImport">⬆ Importar</button>
         <input type="file" id="importFile" accept=".json,application/json" />
       </div>
+      <div class="motiv-bar">
+        <div class="lbl">💪 <strong>Mensajes de motivación</strong><br><span style="font-size:0.7rem">Te llegan como notificación</span></div>
+        <label class="switch">
+          <input type="checkbox" id="motivToggle" />
+          <span class="slider"></span>
+        </label>
+      </div>
       <div class="list" id="recordsList">
         <div class="empty">
           <div class="ico">◈</div>
@@ -666,6 +759,7 @@ body {
   </div>
 
   <div class="toast" id="toast"></div>
+
   <div class="overlay" id="modalConfirm">
     <div class="dialog">
       <h3 id="modalTitle">¿Eliminar?</h3>
@@ -673,6 +767,25 @@ body {
       <div class="acts">
         <button type="button" class="btn btn-ghost" id="btnCancelDelete">Cancelar</button>
         <button type="button" class="btn btn-main" style="background:var(--bad);color:#fff;box-shadow:none" id="btnConfirmDelete">Eliminar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lightbox foto -->
+  <div class="lightbox" id="lightbox" role="dialog" aria-label="Ver foto">
+    <button type="button" class="lb-close" id="lbClose" aria-label="Cerrar">×</button>
+    <img id="lbImg" src="" alt="Foto del corte" />
+  </div>
+
+  <!-- Modal comprobante PDF -->
+  <div class="overlay" id="modalShare">
+    <div class="dialog" style="max-width:320px">
+      <h3>Comprobante del corte</h3>
+      <p id="shareDesc" style="margin-bottom:0.85rem">Generá el PDF para enviar a tu jefe o guardarlo.</p>
+      <div class="acts" style="flex-direction:column;gap:0.45rem">
+        <button type="button" class="btn btn-main" id="btnPdfWa" style="width:100%">📱 Enviar por WhatsApp</button>
+        <button type="button" class="btn btn-info" id="btnPdfDl" style="width:100%">⬇ Descargar PDF</button>
+        <button type="button" class="btn btn-ghost" id="btnShareCancel" style="width:100%">Cancelar</button>
       </div>
     </div>
   </div>
@@ -1055,7 +1168,7 @@ body {
           escapeHtml(c.nombre) + ' ×' + c.cantidad + '</span>';
       }
       var photoHtml = r.foto
-        ? '<img class="thumb" src="' + r.foto + '" alt="" />'
+        ? '<img class="thumb" src="' + r.foto + '" alt="" data-foto="' + r.id + '" />'
         : '<div class="thumb ph">◈</div>';
       var isPaid = !!r.pagado;
 
@@ -1079,6 +1192,7 @@ body {
         '<button type="button" class="btn btn-sm ' + (isPaid ? 'btn-warn' : 'btn-ok') +
         ' btn-toggle-pago" data-id="' + r.id + '">' +
         (isPaid ? 'Marcar por cobrar' : 'Marcar cobrado') + '</button>' +
+        '<button type="button" class="btn btn-info btn-sm btn-share" data-id="' + r.id + '">📄 PDF</button>' +
         '<button type="button" class="btn btn-ghost btn-sm btn-edit" data-id="' + r.id + '">Editar</button>' +
         '<button type="button" class="btn btn-bad btn-sm btn-delete" data-id="' + r.id + '">Eliminar</button>' +
         '</div></div></article>';
@@ -1106,6 +1220,18 @@ body {
         document.getElementById('modalTitle').textContent = '¿Eliminar pieza?';
         document.getElementById('modalText').textContent = 'No se puede deshacer.';
         document.getElementById('modalConfirm').classList.add('show');
+      });
+    }
+    var thumbs = container.querySelectorAll('img.thumb[data-foto]');
+    for (var th = 0; th < thumbs.length; th++) {
+      thumbs[th].addEventListener('click', function () {
+        openLightbox(this.getAttribute('src'));
+      });
+    }
+    var sbs = container.querySelectorAll('.btn-share');
+    for (var si = 0; si < sbs.length; si++) {
+      sbs[si].addEventListener('click', function () {
+        openShareModal(this.getAttribute('data-id'));
       });
     }
   }
@@ -1406,6 +1532,340 @@ body {
     reader.readAsText(file);
   }
 
+  // —— Lightbox foto ——
+  function openLightbox(src) {
+    if (!src) return;
+    document.getElementById('lbImg').src = src;
+    document.getElementById('lightbox').classList.add('show');
+  }
+  function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('show');
+    document.getElementById('lbImg').src = '';
+  }
+
+  // —— PDF / Comprobante ——
+  var shareRegistroId = null;
+
+  function findRegistro(id) {
+    for (var i = 0; i < registros.length; i++) {
+      if (registros[i].id === id) return registros[i];
+    }
+    return null;
+  }
+
+  function openShareModal(id) {
+    shareRegistroId = id;
+    var r = findRegistro(id);
+    if (!r) return;
+    document.getElementById('shareDesc').textContent =
+      (r.descripcion || 'Corte') + ' · ' + getQty(r) + ' prendas';
+    document.getElementById('modalShare').classList.add('show');
+  }
+
+  function closeShareModal() {
+    document.getElementById('modalShare').classList.remove('show');
+    shareRegistroId = null;
+  }
+
+  function buildPdfDoc(r) {
+    var jsPDF = window.jspdf && window.jspdf.jsPDF;
+    if (!jsPDF) {
+      showToast('No se pudo cargar el generador de PDF');
+      return null;
+    }
+    var doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    var pageW = doc.internal.pageSize.getWidth();
+    var margin = 18;
+    var y = 18;
+    var contentW = pageW - margin * 2;
+    var qty = getQty(r);
+    var total = getTotal(r);
+    var isPaid = !!r.pagado;
+
+    // Header band
+    doc.setFillColor(6, 10, 16);
+    doc.rect(0, 0, pageW, 28, 'F');
+    doc.setTextColor(0, 212, 255);
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('COMPROBANTE DE CORTE', pageW / 2, 12, { align: 'center' });
+    doc.setFontSize(10);
+    doc.setTextColor(180, 200, 220);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Mi Producción', pageW / 2, 20, { align: 'center' });
+    y = 36;
+
+    // Photo — large, ~half page emphasis
+    if (r.foto) {
+      try {
+        var imgH = 95;
+        var imgW = contentW;
+        // Center image block
+        doc.setDrawColor(28, 43, 66);
+        doc.setFillColor(15, 24, 40);
+        doc.roundedRect(margin - 2, y - 2, contentW + 4, imgH + 4, 3, 3, 'FD');
+        doc.addImage(r.foto, 'JPEG', margin, y, imgW, imgH);
+        y += imgH + 10;
+      } catch (e) {
+        y += 4;
+      }
+    } else {
+      doc.setFillColor(15, 24, 40);
+      doc.roundedRect(margin, y, contentW, 40, 3, 3, 'F');
+      doc.setTextColor(100, 120, 140);
+      doc.setFontSize(12);
+      doc.text('Sin foto', pageW / 2, y + 22, { align: 'center' });
+      y += 48;
+    }
+
+    // Description
+    doc.setTextColor(20, 30, 50);
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    var descLines = doc.splitTextToSize(r.descripcion || 'Sin descripción', contentW);
+    doc.text(descLines, margin, y);
+    y += descLines.length * 7 + 4;
+
+    // Dates
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(80, 100, 120);
+    var fechaTxt = 'Fecha: ' + formatDate(r.fechaInicio);
+    if (r.fechaFin) fechaTxt += '  →  ' + formatDate(r.fechaFin);
+    doc.text(fechaTxt, margin, y);
+    y += 8;
+
+    // TOTAL PRENDAS — destacado grande
+    doc.setFillColor(0, 180, 160);
+    doc.roundedRect(margin, y, contentW, 28, 4, 4, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text('TOTAL DE PRENDAS', pageW / 2, y + 10, { align: 'center' });
+    doc.setFontSize(22);
+    doc.text(String(qty) + (qty === 1 ? ' pieza' : ' piezas'), pageW / 2, y + 22, { align: 'center' });
+    y += 36;
+
+    // Colores (cantidades, sin precio unitario)
+    var cols = r.colores || [];
+    if (cols.length) {
+      doc.setTextColor(20, 30, 50);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Detalle por color', margin, y);
+      y += 7;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      for (var i = 0; i < cols.length; i++) {
+        var c = cols[i];
+        doc.setTextColor(40, 50, 70);
+        doc.text('•  ' + (c.nombre || 'Color') + '  ×  ' + c.cantidad, margin + 2, y);
+        y += 6;
+        if (y > 270) { doc.addPage(); y = 20; }
+      }
+      y += 4;
+    }
+
+    // Total dinero (sin precio unitario)
+    doc.setFillColor(15, 24, 40);
+    doc.roundedRect(margin, y, contentW, 18, 3, 3, 'F');
+    doc.setTextColor(0, 255, 200);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Total: ' + formatMoney(total), pageW / 2, y + 12, { align: 'center' });
+    y += 24;
+
+    // Estado
+    doc.setFontSize(10);
+    if (isPaid) {
+      doc.setTextColor(34, 211, 160);
+      doc.text('Estado: ✓ COBRADO', margin, y);
+    } else {
+      doc.setTextColor(245, 166, 35);
+      doc.text('Estado: POR COBRAR', margin, y);
+    }
+    y += 8;
+
+    // Notas
+    if (r.notas) {
+      doc.setTextColor(80, 100, 120);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      var noteLines = doc.splitTextToSize('Notas: ' + r.notas, contentW);
+      doc.text(noteLines, margin, y);
+      y += noteLines.length * 5 + 4;
+    }
+
+    // Footer
+    doc.setDrawColor(200, 210, 220);
+    doc.line(margin, 285, pageW - margin, 285);
+    doc.setTextColor(140, 155, 175);
+    doc.setFontSize(8);
+    doc.text('Generado el ' + new Date().toLocaleString('es-BR') + ' · Mi Producción', pageW / 2, 292, { align: 'center' });
+
+    return doc;
+  }
+
+  function downloadPdf() {
+    var r = findRegistro(shareRegistroId);
+    if (!r) { showToast('Registro no encontrado'); return; }
+    var doc = buildPdfDoc(r);
+    if (!doc) return;
+    var name = 'comprobante-' + (r.descripcion || 'corte').replace(/[^\w\-]+/g, '_').slice(0, 30) + '.pdf';
+    doc.save(name);
+    showToast('PDF descargado ✓');
+    closeShareModal();
+  }
+
+  function sharePdfWhatsApp() {
+    var r = findRegistro(shareRegistroId);
+    if (!r) { showToast('Registro no encontrado'); return; }
+    var doc = buildPdfDoc(r);
+    if (!doc) return;
+
+    var blob = doc.output('blob');
+    var fileName = 'comprobante-' + (r.descripcion || 'corte').replace(/[^\w\-]+/g, '_').slice(0, 30) + '.pdf';
+    var file = new File([blob], fileName, { type: 'application/pdf' });
+    var qty = getQty(r);
+    var texto = 'Comprobante de corte:\n' +
+      (r.descripcion || '') + '\n' +
+      qty + ' prendas · Total ' + formatMoney(getTotal(r)) + '\n' +
+      (r.pagado ? '✓ Cobrado' : 'Por cobrar');
+
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({
+        title: 'Comprobante de corte',
+        text: texto,
+        files: [file]
+      }).then(function () {
+        showToast('Compartido ✓');
+        closeShareModal();
+      }).catch(function () {
+        // fallback
+        fallbackWaShare(blob, fileName, texto);
+      });
+    } else {
+      fallbackWaShare(blob, fileName, texto);
+    }
+  }
+
+  function fallbackWaShare(blob, fileName, texto) {
+    // Descargar PDF y abrir WhatsApp con el mensaje
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+
+    var waUrl = 'https://wa.me/?text=' + encodeURIComponent(texto + '\n\n(Adjunto el PDF que se descargó)');
+    window.open(waUrl, '_blank');
+    showToast('PDF listo · Abrí WhatsApp y adjuntá el archivo');
+    closeShareModal();
+  }
+
+  // —— Motivación / Notificaciones ——
+  var MOTIV_KEY = 'mi_produccion_motiv_on';
+  var MOTIV_MSGS = [
+    '¡Cada prenda cuenta! Seguí sumando, vas muy bien 💪',
+    'Hoy es un buen día para anotar tu producción. ¡Vos podés!',
+    'Paso a paso se llena el historial. ¡Excelente trabajo!',
+    'Tu constancia se ve en cada corte. ¡Seguí así!',
+    'Un registro más = más control de tu plata. ¡Dale!',
+    'No dejes para mañana lo que podés anotar hoy ✨',
+    '¡Orgulloso de tu producción! Revisá el historial y celebrá.',
+    'Pequeños avances diarios = grandes resultados. ¡Ánimo!',
+    'Tu jefe va a valorar un buen comprobante. ¡Estás preparado!',
+    'Respirá, enfocá y registrá. ¡Ya casi cerrás la semana!'
+  ];
+  var motivTimer = null;
+
+  function isMotivOn() {
+    return localStorage.getItem(MOTIV_KEY) === '1';
+  }
+
+  function setMotivOn(on) {
+    localStorage.setItem(MOTIV_KEY, on ? '1' : '0');
+  }
+
+  function pickMotivMsg() {
+    return MOTIV_MSGS[Math.floor(Math.random() * MOTIV_MSGS.length)];
+  }
+
+  function showMotivNotification() {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    var msg = pickMotivMsg();
+    try {
+      if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+        navigator.serviceWorker.ready.then(function (reg) {
+          reg.showNotification('Mi Producción 💪', {
+            body: msg,
+            icon: 'icon-192.png',
+            badge: 'icon-192.png',
+            tag: 'motivacion',
+            renotify: true
+          });
+        }).catch(function () {
+          new Notification('Mi Producción 💪', { body: msg, icon: 'icon-192.png' });
+        });
+      } else {
+        new Notification('Mi Producción 💪', { body: msg, icon: 'icon-192.png' });
+      }
+    } catch (e) {}
+  }
+
+  function scheduleMotiv() {
+    if (motivTimer) clearTimeout(motivTimer);
+    if (!isMotivOn()) return;
+    // Entre 3 y 6 horas, o ~30s la primera vez para probar
+    var delay = 30 * 60 * 1000 + Math.random() * 90 * 60 * 1000;
+    motivTimer = setTimeout(function () {
+      showMotivNotification();
+      scheduleMotiv();
+    }, delay);
+  }
+
+  function enableMotiv() {
+    if (!('Notification' in window)) {
+      showToast('Tu navegador no soporta notificaciones');
+      document.getElementById('motivToggle').checked = false;
+      return;
+    }
+    function start() {
+      setMotivOn(true);
+      document.getElementById('motivToggle').checked = true;
+      showToast('Motivación activada ✓');
+      // Primera notificación en unos segundos para confirmar
+      setTimeout(showMotivNotification, 2500);
+      scheduleMotiv();
+    }
+    if (Notification.permission === 'granted') {
+      start();
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then(function (p) {
+        if (p === 'granted') start();
+        else {
+          showToast('Necesitás permitir notificaciones');
+          document.getElementById('motivToggle').checked = false;
+          setMotivOn(false);
+        }
+      });
+    } else {
+      showToast('Notificaciones bloqueadas en el navegador');
+      document.getElementById('motivToggle').checked = false;
+      setMotivOn(false);
+    }
+  }
+
+  function disableMotiv() {
+    setMotivOn(false);
+    if (motivTimer) clearTimeout(motivTimer);
+    motivTimer = null;
+    showToast('Motivación desactivada');
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     loadData();
     updateSummary();
@@ -1415,6 +1875,29 @@ body {
     setupPhoto();
     setupInstall();
     registerSW();
+
+    // Lightbox
+    document.getElementById('lbClose').addEventListener('click', closeLightbox);
+    document.getElementById('lightbox').addEventListener('click', function (e) {
+      if (e.target === this) closeLightbox();
+    });
+
+    // Share / PDF
+    document.getElementById('btnPdfWa').addEventListener('click', sharePdfWhatsApp);
+    document.getElementById('btnPdfDl').addEventListener('click', downloadPdf);
+    document.getElementById('btnShareCancel').addEventListener('click', closeShareModal);
+    document.getElementById('modalShare').addEventListener('click', function (e) {
+      if (e.target === this) closeShareModal();
+    });
+
+    // Motivación
+    var motivEl = document.getElementById('motivToggle');
+    motivEl.checked = isMotivOn();
+    if (isMotivOn() && Notification.permission === 'granted') scheduleMotiv();
+    motivEl.addEventListener('change', function () {
+      if (this.checked) enableMotiv();
+      else disableMotiv();
+    });
 
     var tabs = document.querySelectorAll('.nav button');
     for (var i = 0; i < tabs.length; i++) {
