@@ -546,6 +546,77 @@ body {
   transform: translateX(20px);
   background: var(--mint);
 }
+
+/* —— Meses —— */
+.period-bar {
+  margin-bottom: 0.65rem;
+  padding: 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+.period-bar .row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.period-bar select {
+  flex: 1;
+  min-width: 140px;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.period-bar .btn-close-mes {
+  background: #241c0c;
+  color: var(--warn);
+  border: 1px solid #4a3a18;
+  font-size: 0.78rem;
+  padding: 0.5rem 0.7rem;
+  white-space: nowrap;
+}
+.period-banner {
+  margin-top: 0.55rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.period-banner strong { color: var(--cyan); }
+.period-banner.closed strong { color: var(--warn); }
+.month-sep {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cyan-dim);
+  padding: 0.55rem 0.15rem 0.25rem;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 0.15rem;
+}
+.closed-block {
+  margin-top: 0.85rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--line);
+}
+.closed-block h3 {
+  font-size: 0.82rem;
+  color: var(--violet);
+  margin-bottom: 0.5rem;
+}
+.ro-note {
+  font-size: 0.72rem;
+  color: var(--warn);
+  background: #241c0c;
+  border: 1px solid #4a3a18;
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  margin-bottom: 0.55rem;
+}
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
@@ -672,15 +743,23 @@ body {
 
     <!-- LIST -->
     <section class="panel" id="section-list">
+      <div class="period-bar">
+        <div class="row">
+          <select id="periodSelect" title="Elegir mes">
+            <option value="actual">📅 Mes actual</option>
+          </select>
+          <button type="button" class="btn btn-close-mes" id="btnCloseMonth">🔒 Cerrar mes</button>
+        </div>
+        <div class="period-banner" id="periodBanner">
+          Estás en el <strong>mes actual</strong>. Al cerrarlo se guarda todo (cortes + adelantos) y empezás de cero.
+        </div>
+      </div>
       <div class="filters">
         <input type="search" id="searchInput" placeholder="Buscar..." />
         <select id="filterPago">
           <option value="">Todos</option>
           <option value="pendiente">Por cobrar</option>
           <option value="pagado">Ya cobrados</option>
-        </select>
-        <select id="filterMonth">
-          <option value="">Todos los meses</option>
         </select>
       </div>
       <div class="tools">
@@ -700,6 +779,10 @@ body {
           <div class="ico">◈</div>
           <p>Todavía no anotaste nada.<br>Registra tu primer corte.</p>
         </div>
+      </div>
+      <div class="closed-block" id="closedValesBlock" style="display:none">
+        <h3>◈ Adelantos de este mes cerrado</h3>
+        <div class="list" id="closedValesList"></div>
       </div>
     </section>
 
@@ -796,8 +879,11 @@ body {
 
   var STORAGE_KEY = 'mi_produccion_reg_v1';
   var STORAGE_VALES = 'mi_produccion_vales_v1';
+  var STORAGE_MESES = 'mi_produccion_meses_v1';
   var registros = [];
   var vales = [];
+  var mesesCerrados = [];
+  var viewingPeriod = 'actual'; // 'actual' | id de mes cerrado
   var coloresTemp = [];
   var fotoBase64 = null;
   var deleteId = null;
@@ -845,9 +931,13 @@ body {
       if (!Array.isArray(vales)) vales = [];
       for (var j = 0; j < vales.length; j++) {
         if (typeof vales[j].descontado === 'undefined') vales[j].descontado = false;
-        // Migrar: si venía con persona, ignoramos el campo
       }
     } catch (e2) { vales = []; }
+    try {
+      var rawM = localStorage.getItem(STORAGE_MESES);
+      mesesCerrados = rawM ? JSON.parse(rawM) : [];
+      if (!Array.isArray(mesesCerrados)) mesesCerrados = [];
+    } catch (e3) { mesesCerrados = []; }
   }
 
   function saveData() {
@@ -858,6 +948,213 @@ body {
   function saveVales() {
     try { localStorage.setItem(STORAGE_VALES, JSON.stringify(vales)); }
     catch (e) { showToast('Error al guardar adelantos'); }
+  }
+
+  function saveMeses() {
+    try { localStorage.setItem(STORAGE_MESES, JSON.stringify(mesesCerrados)); }
+    catch (e) { showToast('Error al guardar meses cerrados'); }
+  }
+
+  function isViewingClosed() {
+    return viewingPeriod !== 'actual';
+  }
+
+  function getClosedMonth(id) {
+    for (var i = 0; i < mesesCerrados.length; i++) {
+      if (mesesCerrados[i].id === id) return mesesCerrados[i];
+    }
+    return null;
+  }
+
+  function getViewRegistros() {
+    if (!isViewingClosed()) return registros;
+    var m = getClosedMonth(viewingPeriod);
+    return m && m.registros ? m.registros : [];
+  }
+
+  function getViewVales() {
+    if (!isViewingClosed()) return vales;
+    var m = getClosedMonth(viewingPeriod);
+    return m && m.vales ? m.vales : [];
+  }
+
+  /** Guarda cambios del período que se está viendo (actual o cerrado). */
+  function persistViewData() {
+    if (!isViewingClosed()) {
+      saveData();
+      saveVales();
+      return;
+    }
+    var m = getClosedMonth(viewingPeriod);
+    if (!m) return;
+    m.resumen = calcResumen(m.registros || [], m.vales || []);
+    saveMeses();
+  }
+
+  function setViewRegistros(arr) {
+    if (!isViewingClosed()) {
+      registros = arr;
+    } else {
+      var m = getClosedMonth(viewingPeriod);
+      if (m) m.registros = arr;
+    }
+  }
+
+  function setViewVales(arr) {
+    if (!isViewingClosed()) {
+      vales = arr;
+    } else {
+      var m = getClosedMonth(viewingPeriod);
+      if (m) m.vales = arr;
+    }
+  }
+
+  function calcResumen(regs, vals) {
+    var totalPrendas = 0, totalDinero = 0, totalPendiente = 0, totalPagado = 0;
+    for (var i = 0; i < regs.length; i++) {
+      var r = regs[i];
+      var qty = getQty(r);
+      var tot = qty * (Number(r.precio) || 0);
+      totalPrendas += qty;
+      totalDinero += tot;
+      if (r.pagado) totalPagado += tot;
+      else totalPendiente += tot;
+    }
+    var valesPend = 0;
+    for (var v = 0; v < vals.length; v++) {
+      if (!vals[v].descontado) valesPend += Number(vals[v].monto) || 0;
+    }
+    return {
+      prendas: totalPrendas,
+      total: totalDinero,
+      pendiente: totalPendiente,
+      pagado: totalPagado,
+      valesPend: valesPend,
+      neto: totalPendiente - valesPend
+    };
+  }
+
+  function monthKeyFromDate(str) {
+    if (!str || str.length < 7) return '';
+    return str.slice(0, 7);
+  }
+
+  function labelFromKey(key) {
+    if (!key || key.length < 7) return key || '—';
+    var p = key.split('-');
+    return p[1] + '/' + p[0];
+  }
+
+  function suggestMonthKey(regs) {
+    var counts = {};
+    var best = '';
+    var bestN = 0;
+    for (var i = 0; i < regs.length; i++) {
+      var k = monthKeyFromDate(regs[i].fechaInicio);
+      if (!k) continue;
+      counts[k] = (counts[k] || 0) + 1;
+      if (counts[k] > bestN) { bestN = counts[k]; best = k; }
+    }
+    if (best) return best;
+    var now = new Date();
+    return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  }
+
+  function fillPeriodSelect() {
+    var sel = document.getElementById('periodSelect');
+    if (!sel) return;
+    var cur = viewingPeriod;
+    sel.innerHTML = '<option value="actual">📅 Mes actual</option>';
+    var sorted = mesesCerrados.slice().sort(function (a, b) {
+      return (b.key || '').localeCompare(a.key || '');
+    });
+    for (var i = 0; i < sorted.length; i++) {
+      var m = sorted[i];
+      var opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = '🔒 ' + (m.label || labelFromKey(m.key));
+      sel.appendChild(opt);
+    }
+    sel.value = cur;
+    if (sel.value !== cur) {
+      viewingPeriod = 'actual';
+      sel.value = 'actual';
+    }
+  }
+
+  function updatePeriodUI() {
+    var banner = document.getElementById('periodBanner');
+    var btnClose = document.getElementById('btnCloseMonth');
+    var closedBlock = document.getElementById('closedValesBlock');
+    fillPeriodSelect();
+    if (!isViewingClosed()) {
+      banner.className = 'period-banner';
+      banner.innerHTML = 'Estás en el <strong>mes actual</strong>. Al cerrarlo se guarda todo (cortes + adelantos) y empezás de cero.';
+      btnClose.style.display = '';
+      if (closedBlock) closedBlock.style.display = 'none';
+    } else {
+      var m = getClosedMonth(viewingPeriod);
+      var lab = m ? (m.label || labelFromKey(m.key)) : '—';
+      var when = m && m.cerradoEn ? formatDate(m.cerradoEn.slice(0, 10)) : '';
+      banner.className = 'period-banner closed';
+      banner.innerHTML = 'Editando mes cerrado: <strong>' + escapeHtml(lab) + '</strong>' +
+        (when ? ' · cerrado el ' + when : '') +
+        '. Podés modificar cortes y adelantos de este mes.';
+      btnClose.style.display = 'none';
+    }
+  }
+
+  function closeCurrentMonth() {
+    if (isViewingClosed()) {
+      showToast('Estás viendo un mes cerrado');
+      return;
+    }
+    if (registros.length === 0 && vales.length === 0) {
+      showToast('No hay nada para cerrar en el mes actual');
+      return;
+    }
+    var key = suggestMonthKey(registros);
+    var label = labelFromKey(key);
+    var nReg = registros.length;
+    var nVal = vales.length;
+    var msg =
+      '¿Cerrar el mes actual como «' + label + '»?\n\n' +
+      'Se guardarán ' + nReg + ' corte(s) y ' + nVal + ' adelanto(s).\n' +
+      'Después el mes actual queda vacío para empezar de nuevo.\n\n' +
+      'Los datos cerrados quedan guardados y los podés consultar cuando quieras.';
+    if (!window.confirm(msg)) {
+      showToast('Cierre cancelado');
+      return;
+    }
+    var resumen = calcResumen(registros, vales);
+    var cerrado = {
+      id: uid(),
+      key: key,
+      label: label,
+      cerradoEn: new Date().toISOString(),
+      registros: JSON.parse(JSON.stringify(registros)),
+      vales: JSON.parse(JSON.stringify(vales)),
+      resumen: resumen
+    };
+    // Si ya existe un mes con la misma etiqueta, numerar
+    var same = 0;
+    for (var i = 0; i < mesesCerrados.length; i++) {
+      if ((mesesCerrados[i].label || '').indexOf(label) === 0) same++;
+    }
+    if (same > 0) cerrado.label = label + ' (' + (same + 1) + ')';
+
+    mesesCerrados.unshift(cerrado);
+    registros = [];
+    vales = [];
+    saveMeses();
+    saveData();
+    saveVales();
+    viewingPeriod = 'actual';
+    updateSummary();
+    updatePeriodUI();
+    renderList();
+    renderVales();
+    showToast('Mes «' + cerrado.label + '» cerrado y guardado ✓');
   }
 
   function getQty(r) {
@@ -871,35 +1168,27 @@ body {
   }
 
   function updateSummary() {
-    var totalPrendas = 0, totalDinero = 0, totalPendiente = 0, totalPagado = 0;
-    for (var i = 0; i < registros.length; i++) {
-      var r = registros[i];
-      var qty = getQty(r);
-      var tot = qty * (Number(r.precio) || 0);
-      totalPrendas += qty;
-      totalDinero += tot;
-      if (r.pagado) totalPagado += tot;
-      else totalPendiente += tot;
-    }
-    var valesPend = 0;
-    for (var v = 0; v < vales.length; v++) {
-      if (!vales[v].descontado) valesPend += Number(vales[v].monto) || 0;
-    }
-    var saldoNeto = totalPendiente - valesPend;
+    var regs = getViewRegistros();
+    var vals = getViewVales();
+    var res = calcResumen(regs, vals);
 
-    document.getElementById('sumPrendas').textContent = totalPrendas;
-    document.getElementById('sumTotal').textContent = formatMoney(totalDinero);
-    document.getElementById('sumPendiente').textContent = formatMoney(totalPendiente);
-    document.getElementById('sumPagado').textContent = formatMoney(totalPagado);
-    document.getElementById('sumValesPend').textContent = formatMoney(valesPend);
-    document.getElementById('sumNeto').textContent = formatMoney(saldoNeto);
-    document.getElementById('sumNetoCard').textContent = formatMoney(saldoNeto);
+    document.getElementById('sumPrendas').textContent = res.prendas;
+    document.getElementById('sumTotal').textContent = formatMoney(res.total);
+    document.getElementById('sumPendiente').textContent = formatMoney(res.pendiente);
+    document.getElementById('sumPagado').textContent = formatMoney(res.pagado);
+    document.getElementById('sumValesPend').textContent = formatMoney(res.valesPend);
+    document.getElementById('sumNeto').textContent = formatMoney(res.neto);
+    document.getElementById('sumNetoCard').textContent = formatMoney(res.neto);
 
-    if (valesPend > 0) {
+    if (isViewingClosed()) {
+      var m = getClosedMonth(viewingPeriod);
+      var lab = m ? (m.label || labelFromKey(m.key)) : 'cerrado';
+      document.getElementById('netDetail').textContent = 'Mes cerrado: ' + lab;
+    } else if (res.valesPend > 0) {
       document.getElementById('netDetail').textContent =
-        formatMoney(totalPendiente) + ' − ' + formatMoney(valesPend) + ' adelantos';
+        formatMoney(res.pendiente) + ' − ' + formatMoney(res.valesPend) + ' adelantos';
     } else {
-      document.getElementById('netDetail').textContent = 'Sin adelantos pendientes';
+      document.getElementById('netDetail').textContent = 'Mes actual · sin adelantos pendientes';
     }
   }
 
@@ -1065,19 +1354,21 @@ body {
         cantidad: Number(coloresTemp[k].cantidad)
       });
     }
+    var list = getViewRegistros();
     var idx = -1;
-    for (var i = 0; i < registros.length; i++) {
-      if (registros[i].id === data.id) { idx = i; break; }
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === data.id) { idx = i; break; }
     }
     if (idx >= 0) {
-      data.creado = registros[idx].creado || data.creado;
-      registros[idx] = data;
+      data.creado = list[idx].creado || data.creado;
+      list[idx] = data;
       showToast('Actualizado ✓');
     } else {
-      registros.unshift(data);
-      showToast('Guardado ✓');
+      list.unshift(data);
+      showToast(isViewingClosed() ? 'Guardado en mes cerrado ✓' : 'Guardado ✓');
     }
-    saveData();
+    setViewRegistros(list);
+    persistViewData();
     updateSummary();
     renderList();
     resetForm();
@@ -1086,13 +1377,15 @@ body {
   }
 
   function togglePagado(id) {
-    for (var i = 0; i < registros.length; i++) {
-      if (registros[i].id === id) {
-        registros[i].pagado = !registros[i].pagado;
-        saveData();
+    var list = getViewRegistros();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) {
+        list[i].pagado = !list[i].pagado;
+        setViewRegistros(list);
+        persistViewData();
         updateSummary();
         renderList();
-        showToast(registros[i].pagado ? 'Marcado como cobrado ✓' : 'Marcado por cobrar');
+        showToast(list[i].pagado ? 'Marcado como cobrado ✓' : 'Marcado por cobrar');
         break;
       }
     }
@@ -1106,12 +1399,14 @@ body {
   function renderList() {
     var container = document.getElementById('recordsList');
     var search = (document.getElementById('searchInput').value || '').toLowerCase();
-    var monthFilter = document.getElementById('filterMonth').value;
     var pagoFilter = document.getElementById('filterPago').value;
+    var source = getViewRegistros();
+
+    updatePeriodUI();
 
     var filtered = [];
-    for (var i = 0; i < registros.length; i++) {
-      var r = registros[i];
+    for (var i = 0; i < source.length; i++) {
+      var r = source[i];
       var ok = true;
       if (search) {
         var match = (r.descripcion || '').toLowerCase().indexOf(search) !== -1 ||
@@ -1123,40 +1418,39 @@ body {
         }
         if (!match) ok = false;
       }
-      if (ok && monthFilter && !(r.fechaInicio || '').startsWith(monthFilter)) ok = false;
       if (ok && pagoFilter === 'pendiente' && r.pagado) ok = false;
       if (ok && pagoFilter === 'pagado' && !r.pagado) ok = false;
       if (ok) filtered.push(r);
     }
 
-    var months = {};
-    for (var m = 0; m < registros.length; m++) {
-      if (registros[m].fechaInicio) months[registros[m].fechaInicio.slice(0, 7)] = true;
-    }
-    var select = document.getElementById('filterMonth');
-    var current = select.value;
-    select.innerHTML = '<option value="">Todos los meses</option>';
-    var keys = Object.keys(months).sort().reverse();
-    for (var mi = 0; mi < keys.length; mi++) {
-      var key = keys[mi];
-      var parts = key.split('-');
-      var opt = document.createElement('option');
-      opt.value = key;
-      opt.textContent = parts[1] + '/' + parts[0];
-      if (key === current) opt.selected = true;
-      select.appendChild(opt);
-    }
+    // Ordenar por fecha desc y agrupar por mes
+    filtered.sort(function (a, b) {
+      return (b.fechaInicio || '').localeCompare(a.fechaInicio || '');
+    });
 
     if (filtered.length === 0) {
       container.innerHTML = '<div class="empty"><div class="ico">◈</div><p>' +
-        (registros.length === 0 ? 'Todavía no anotaste nada.<br>Registra tu primer corte.' : 'Nada con ese filtro.') +
+        (source.length === 0
+          ? (isViewingClosed() ? 'Este mes cerrado no tiene cortes.' : 'Todavía no anotaste nada.<br>Registra tu primer corte.')
+          : 'Nada con ese filtro.') +
         '</p></div>';
+      renderClosedValesBlock();
       return;
     }
 
     var html = '';
+    if (isViewingClosed()) {
+      html += '<div class="ro-note">🔒 Mes cerrado · editable (cambios se guardan en este mes)</div>';
+    }
+
+    var lastMonth = '';
     for (var fi = 0; fi < filtered.length; fi++) {
       var r = filtered[fi];
+      var mk = monthKeyFromDate(r.fechaInicio);
+      if (mk && mk !== lastMonth) {
+        html += '<div class="month-sep">📅 ' + labelFromKey(mk) + '</div>';
+        lastMonth = mk;
+      }
       var qty = getQty(r);
       var total = getTotal(r);
       var colorsHtml = '';
@@ -1207,8 +1501,9 @@ body {
     for (var ei = 0; ei < ebs.length; ei++) {
       ebs[ei].addEventListener('click', function () {
         var id = this.getAttribute('data-id');
-        for (var x = 0; x < registros.length; x++) {
-          if (registros[x].id === id) { fillForm(registros[x]); break; }
+        var src = getViewRegistros();
+        for (var x = 0; x < src.length; x++) {
+          if (src[x].id === id) { fillForm(src[x]); break; }
         }
       });
     }
@@ -1218,7 +1513,9 @@ body {
         deleteId = this.getAttribute('data-id');
         deleteType = 'registro';
         document.getElementById('modalTitle').textContent = '¿Eliminar pieza?';
-        document.getElementById('modalText').textContent = 'No se puede deshacer.';
+        document.getElementById('modalText').textContent = isViewingClosed()
+          ? 'Se eliminará del mes cerrado. No se puede deshacer.'
+          : 'No se puede deshacer.';
         document.getElementById('modalConfirm').classList.add('show');
       });
     }
@@ -1232,6 +1529,76 @@ body {
     for (var si = 0; si < sbs.length; si++) {
       sbs[si].addEventListener('click', function () {
         openShareModal(this.getAttribute('data-id'));
+      });
+    }
+
+    renderClosedValesBlock();
+  }
+
+  function renderClosedValesBlock() {
+    var block = document.getElementById('closedValesBlock');
+    var listEl = document.getElementById('closedValesList');
+    if (!block || !listEl) return;
+    if (!isViewingClosed()) {
+      block.style.display = 'none';
+      listEl.innerHTML = '';
+      return;
+    }
+    var vals = getViewVales();
+    block.style.display = 'block';
+    if (vals.length === 0) {
+      listEl.innerHTML = '<div class="empty" style="padding:1rem"><p>Sin adelantos en este mes.</p></div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < vals.length; i++) {
+      var v = vals[i];
+      var isDesc = !!v.descontado;
+      html +=
+        '<article class="item adv' + (isDesc ? ' done' : '') + '">' +
+        '<div class="item-h">' +
+        '<div class="thumb ph" style="color:var(--violet)">◈</div>' +
+        '<div class="item-info">' +
+        '<h3>Adelanto</h3>' +
+        '<div class="item-meta">' + formatDate(v.fecha) + '</div>' +
+        '<span class="tag ' + (isDesc ? 'o' : 'v') + '">' +
+        (isDesc ? '✓ DESCONTADO' : 'PENDIENTE') + '</span>' +
+        '</div>' +
+        '<div class="item-money ' + (isDesc ? 'o' : 'v') + '">' + formatMoney(v.monto) + '</div></div>' +
+        '<div class="item-b">' +
+        (v.notas ? '<div class="item-meta" style="margin-bottom:0.3rem">' + escapeHtml(v.notas) + '</div>' : '') +
+        '<div class="acts">' +
+        '<button type="button" class="btn btn-sm ' + (isDesc ? 'btn-warn' : 'btn-info') +
+        ' btn-toggle-vale-closed" data-id="' + v.id + '">' +
+        (isDesc ? 'Marcar pendiente' : 'Marcar descontado') + '</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm btn-edit-vale-closed" data-id="' + v.id + '">Editar</button>' +
+        '<button type="button" class="btn btn-bad btn-sm btn-delete-vale-closed" data-id="' + v.id + '">Eliminar</button>' +
+        '</div></div></article>';
+    }
+    listEl.innerHTML = html;
+
+    var tbs = listEl.querySelectorAll('.btn-toggle-vale-closed');
+    for (var ti = 0; ti < tbs.length; ti++) {
+      tbs[ti].addEventListener('click', function () { toggleDescontado(this.getAttribute('data-id')); });
+    }
+    var ebs = listEl.querySelectorAll('.btn-edit-vale-closed');
+    for (var ei = 0; ei < ebs.length; ei++) {
+      ebs[ei].addEventListener('click', function () {
+        var id = this.getAttribute('data-id');
+        var src = getViewVales();
+        for (var x = 0; x < src.length; x++) {
+          if (src[x].id === id) { fillValeForm(src[x]); break; }
+        }
+      });
+    }
+    var dbs = listEl.querySelectorAll('.btn-delete-vale-closed');
+    for (var di = 0; di < dbs.length; di++) {
+      dbs[di].addEventListener('click', function () {
+        deleteId = this.getAttribute('data-id');
+        deleteType = 'vale';
+        document.getElementById('modalTitle').textContent = '¿Eliminar adelanto?';
+        document.getElementById('modalText').textContent = 'Se eliminará del mes cerrado. No se puede deshacer.';
+        document.getElementById('modalConfirm').classList.add('show');
       });
     }
   }
@@ -1279,33 +1646,39 @@ body {
       descontado: document.getElementById('valeDescontadoCheck').checked,
       creado: new Date().toISOString()
     };
+    var list = getViewVales();
     var idx = -1;
-    for (var i = 0; i < vales.length; i++) {
-      if (vales[i].id === data.id) { idx = i; break; }
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === data.id) { idx = i; break; }
     }
     if (idx >= 0) {
-      data.creado = vales[idx].creado || data.creado;
-      vales[idx] = data;
+      data.creado = list[idx].creado || data.creado;
+      list[idx] = data;
       showToast('Adelanto actualizado ✓');
     } else {
-      vales.unshift(data);
-      showToast('Adelanto guardado ✓');
+      list.unshift(data);
+      showToast(isViewingClosed() ? 'Adelanto guardado en mes cerrado ✓' : 'Adelanto guardado ✓');
     }
-    saveVales();
+    setViewVales(list);
+    persistViewData();
     updateSummary();
     renderVales();
+    renderClosedValesBlock();
     resetValeForm();
     return false;
   }
 
   function toggleDescontado(id) {
-    for (var i = 0; i < vales.length; i++) {
-      if (vales[i].id === id) {
-        vales[i].descontado = !vales[i].descontado;
-        saveVales();
+    var list = getViewVales();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) {
+        list[i].descontado = !list[i].descontado;
+        setViewVales(list);
+        persistViewData();
         updateSummary();
         renderVales();
-        showToast(vales[i].descontado ? 'Marcado como descontado ✓' : 'Marcado pendiente');
+        renderClosedValesBlock();
+        showToast(list[i].descontado ? 'Marcado como descontado ✓' : 'Marcado pendiente');
         break;
       }
     }
@@ -1315,10 +1688,11 @@ body {
     var container = document.getElementById('valesList');
     var search = (document.getElementById('searchVales').value || '').toLowerCase();
     var estadoFilter = document.getElementById('filterValeEstado').value;
+    var source = getViewVales();
 
     var filtered = [];
-    for (var i = 0; i < vales.length; i++) {
-      var v = vales[i];
+    for (var i = 0; i < source.length; i++) {
+      var v = source[i];
       var ok = true;
       if (search && (v.notas || '').toLowerCase().indexOf(search) === -1) ok = false;
       if (ok && estadoFilter === 'pendiente' && v.descontado) ok = false;
@@ -1328,12 +1702,17 @@ body {
 
     if (filtered.length === 0) {
       container.innerHTML = '<div class="empty"><div class="ico">◈</div><p>' +
-        (vales.length === 0 ? 'No hay adelantos.<br>Agrega uno arriba si te dieron plata.' : 'Nada con ese filtro.') +
+        (source.length === 0
+          ? (isViewingClosed() ? 'Sin adelantos en este mes cerrado.' : 'No hay adelantos.<br>Agrega uno arriba si te dieron plata.')
+          : 'Nada con ese filtro.') +
         '</p></div>';
       return;
     }
 
     var html = '';
+    if (isViewingClosed()) {
+      html += '<div class="ro-note">🔒 Adelantos del mes cerrado · editable</div>';
+    }
     for (var fi = 0; fi < filtered.length; fi++) {
       var v = filtered[fi];
       var isDesc = !!v.descontado;
@@ -1368,8 +1747,9 @@ body {
     for (var ei = 0; ei < ebs.length; ei++) {
       ebs[ei].addEventListener('click', function () {
         var id = this.getAttribute('data-id');
-        for (var x = 0; x < vales.length; x++) {
-          if (vales[x].id === id) { fillValeForm(vales[x]); break; }
+        var src = getViewVales();
+        for (var x = 0; x < src.length; x++) {
+          if (src[x].id === id) { fillValeForm(src[x]); break; }
         }
       });
     }
@@ -1379,7 +1759,9 @@ body {
         deleteId = this.getAttribute('data-id');
         deleteType = 'vale';
         document.getElementById('modalTitle').textContent = '¿Eliminar adelanto?';
-        document.getElementById('modalText').textContent = 'No se puede deshacer.';
+        document.getElementById('modalText').textContent = isViewingClosed()
+          ? 'Se eliminará del mes cerrado. No se puede deshacer.'
+          : 'No se puede deshacer.';
         document.getElementById('modalConfirm').classList.add('show');
       });
     }
@@ -1431,7 +1813,7 @@ body {
   }
 
   function exportJSON() {
-    if (registros.length === 0 && vales.length === 0) {
+    if (registros.length === 0 && vales.length === 0 && mesesCerrados.length === 0) {
       showToast('No hay datos para exportar');
       return;
     }
@@ -1450,10 +1832,11 @@ body {
 
     var payload = {
       app: 'Mi Producción',
-      version: 1,
+      version: 2,
       exportado: new Date().toISOString(),
       registros: registros,
-      vales: vales
+      vales: vales,
+      mesesCerrados: mesesCerrados
     };
     var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     var url = URL.createObjectURL(blob);
@@ -1475,11 +1858,13 @@ body {
         var data = JSON.parse(ev.target.result);
         var lista = [];
         var listaVales = [];
+        var listaMeses = [];
         if (Array.isArray(data)) {
           lista = data;
         } else if (data && typeof data === 'object') {
           lista = Array.isArray(data.registros) ? data.registros : (Array.isArray(data.data) ? data.data : []);
           listaVales = Array.isArray(data.vales) ? data.vales : [];
+          listaMeses = Array.isArray(data.mesesCerrados) ? data.mesesCerrados : [];
         } else {
           showToast('Formato no reconocido');
           return;
@@ -1506,21 +1891,40 @@ body {
             validosVales.push(vv);
           }
         }
+        var validosMeses = [];
+        for (var k = 0; k < listaMeses.length; k++) {
+          var mm = listaMeses[k];
+          if (mm && (Array.isArray(mm.registros) || Array.isArray(mm.vales))) {
+            if (!mm.id) mm.id = uid();
+            if (!mm.registros) mm.registros = [];
+            if (!mm.vales) mm.vales = [];
+            if (!mm.key) mm.key = suggestMonthKey(mm.registros);
+            if (!mm.label) mm.label = labelFromKey(mm.key);
+            validosMeses.push(mm);
+          }
+        }
 
-        if (validos.length === 0 && validosVales.length === 0) {
+        if (validos.length === 0 && validosVales.length === 0 && validosMeses.length === 0) {
           showToast('No hay datos válidos');
           return;
         }
 
-        var msg = 'Se importarán ' + validos.length + ' pieza(s) y ' +
-          validosVales.length + ' adelanto(s).\n\n¿Reemplazar todo lo actual?';
+        var msg = 'Se importarán:\n' +
+          '• ' + validos.length + ' corte(s) del mes actual\n' +
+          '• ' + validosVales.length + ' adelanto(s) del mes actual\n' +
+          '• ' + validosMeses.length + ' mes(es) cerrado(s)\n\n' +
+          '¿Reemplazar todo lo actual?';
         if (!window.confirm(msg)) { showToast('Importación cancelada'); return; }
 
         registros = validos;
         vales = validosVales;
+        mesesCerrados = validosMeses;
+        viewingPeriod = 'actual';
         saveData();
         saveVales();
+        saveMeses();
         updateSummary();
+        updatePeriodUI();
         renderList();
         renderVales();
         showToast('Importado ✓');
@@ -1547,8 +1951,13 @@ body {
   var shareRegistroId = null;
 
   function findRegistro(id) {
-    for (var i = 0; i < registros.length; i++) {
-      if (registros[i].id === id) return registros[i];
+    var src = getViewRegistros();
+    for (var i = 0; i < src.length; i++) {
+      if (src[i].id === id) return src[i];
+    }
+    // fallback en mes actual por si acaso
+    for (var j = 0; j < registros.length; j++) {
+      if (registros[j].id === id) return registros[j];
     }
     return null;
   }
@@ -1579,7 +1988,6 @@ body {
     var y = 18;
     var contentW = pageW - margin * 2;
     var qty = getQty(r);
-    var total = getTotal(r);
     var isPaid = !!r.pagado;
 
     // Header band
@@ -1598,14 +2006,13 @@ body {
     // Photo — large, ~half page emphasis
     if (r.foto) {
       try {
-        var imgH = 95;
+        var imgH = 110;
         var imgW = contentW;
-        // Center image block
         doc.setDrawColor(28, 43, 66);
         doc.setFillColor(15, 24, 40);
         doc.roundedRect(margin - 2, y - 2, contentW + 4, imgH + 4, 3, 3, 'FD');
         doc.addImage(r.foto, 'JPEG', margin, y, imgW, imgH);
-        y += imgH + 10;
+        y += imgH + 12;
       } catch (e) {
         y += 4;
       }
@@ -1633,20 +2040,20 @@ body {
     var fechaTxt = 'Fecha: ' + formatDate(r.fechaInicio);
     if (r.fechaFin) fechaTxt += '  →  ' + formatDate(r.fechaFin);
     doc.text(fechaTxt, margin, y);
-    y += 8;
+    y += 10;
 
-    // TOTAL PRENDAS — destacado grande
+    // TOTAL PRENDAS — único total destacado (sin montos)
     doc.setFillColor(0, 180, 160);
-    doc.roundedRect(margin, y, contentW, 28, 4, 4, 'F');
+    doc.roundedRect(margin, y, contentW, 32, 4, 4, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(11);
+    doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.text('TOTAL DE PRENDAS', pageW / 2, y + 10, { align: 'center' });
-    doc.setFontSize(22);
-    doc.text(String(qty) + (qty === 1 ? ' pieza' : ' piezas'), pageW / 2, y + 22, { align: 'center' });
-    y += 36;
+    doc.text('TOTAL DE PRENDAS', pageW / 2, y + 11, { align: 'center' });
+    doc.setFontSize(24);
+    doc.text(String(qty) + (qty === 1 ? ' pieza' : ' piezas'), pageW / 2, y + 25, { align: 'center' });
+    y += 42;
 
-    // Colores (cantidades, sin precio unitario)
+    // Colores (solo cantidades, sin precios)
     var cols = r.colores || [];
     if (cols.length) {
       doc.setTextColor(20, 30, 50);
@@ -1663,19 +2070,10 @@ body {
         y += 6;
         if (y > 270) { doc.addPage(); y = 20; }
       }
-      y += 4;
+      y += 6;
     }
 
-    // Total dinero (sin precio unitario)
-    doc.setFillColor(15, 24, 40);
-    doc.roundedRect(margin, y, contentW, 18, 3, 3, 'F');
-    doc.setTextColor(0, 255, 200);
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Total: ' + formatMoney(total), pageW / 2, y + 12, { align: 'center' });
-    y += 24;
-
-    // Estado
+    // Estado (sin montos)
     doc.setFontSize(10);
     if (isPaid) {
       doc.setTextColor(34, 211, 160);
@@ -1729,7 +2127,7 @@ body {
     var qty = getQty(r);
     var texto = 'Comprobante de corte:\n' +
       (r.descripcion || '') + '\n' +
-      qty + ' prendas · Total ' + formatMoney(getTotal(r)) + '\n' +
+      qty + (qty === 1 ? ' prenda' : ' prendas') + '\n' +
       (r.pagado ? '✓ Cobrado' : 'Por cobrar');
 
     if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -1868,6 +2266,8 @@ body {
 
   document.addEventListener('DOMContentLoaded', function () {
     loadData();
+    viewingPeriod = 'actual';
+    updatePeriodUI();
     updateSummary();
     renderList();
     resetForm();
@@ -1921,8 +2321,16 @@ body {
     document.getElementById('formRegistro').addEventListener('submit', handleSubmit);
     document.getElementById('btnCancelEdit').addEventListener('click', resetForm);
     document.getElementById('searchInput').addEventListener('input', renderList);
-    document.getElementById('filterMonth').addEventListener('change', renderList);
     document.getElementById('filterPago').addEventListener('change', renderList);
+
+    document.getElementById('periodSelect').addEventListener('change', function () {
+      viewingPeriod = this.value || 'actual';
+      updateSummary();
+      updatePeriodUI();
+      renderList();
+      renderVales();
+    });
+    document.getElementById('btnCloseMonth').addEventListener('click', closeCurrentMonth);
 
     document.getElementById('formVale').addEventListener('submit', handleValeSubmit);
     document.getElementById('btnCancelValeEdit').addEventListener('click', resetValeForm);
@@ -1946,22 +2354,25 @@ body {
     document.getElementById('btnConfirmDelete').addEventListener('click', function () {
       if (deleteId) {
         if (deleteType === 'vale') {
+          var srcV = getViewVales();
           var nv = [];
-          for (var i = 0; i < vales.length; i++) {
-            if (vales[i].id !== deleteId) nv.push(vales[i]);
+          for (var i = 0; i < srcV.length; i++) {
+            if (srcV[i].id !== deleteId) nv.push(srcV[i]);
           }
-          vales = nv;
-          saveVales();
+          setViewVales(nv);
+          persistViewData();
           updateSummary();
           renderVales();
+          renderClosedValesBlock();
           showToast('Adelanto eliminado');
         } else {
+          var srcR = getViewRegistros();
           var nr = [];
-          for (var j = 0; j < registros.length; j++) {
-            if (registros[j].id !== deleteId) nr.push(registros[j]);
+          for (var j = 0; j < srcR.length; j++) {
+            if (srcR[j].id !== deleteId) nr.push(srcR[j]);
           }
-          registros = nr;
-          saveData();
+          setViewRegistros(nr);
+          persistViewData();
           updateSummary();
           renderList();
           showToast('Eliminado');
