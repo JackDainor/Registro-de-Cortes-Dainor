@@ -1976,175 +1976,264 @@ body {
     shareRegistroId = null;
   }
 
+  function getPhotoSize(dataUrl) {
+    return new Promise(function (resolve) {
+      if (!dataUrl) { resolve(null); return; }
+      var img = new Image();
+      img.onload = function () {
+        resolve({ w: img.naturalWidth || img.width, h: img.naturalHeight || img.height });
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = dataUrl;
+    });
+  }
+
+  /** Encaja la imagen en un rectángulo sin deformarla (respeta proporción). */
+  function fitImage(natW, natH, maxW, maxH) {
+    if (!natW || !natH) return { w: maxW, h: maxH };
+    var scale = Math.min(maxW / natW, maxH / natH);
+    return { w: natW * scale, h: natH * scale };
+  }
+
   function buildPdfDoc(r) {
     var jsPDF = window.jspdf && window.jspdf.jsPDF;
     if (!jsPDF) {
       showToast('No se pudo cargar el generador de PDF');
-      return null;
+      return Promise.resolve(null);
     }
-    var doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    var pageW = doc.internal.pageSize.getWidth();
-    var margin = 18;
-    var y = 18;
-    var contentW = pageW - margin * 2;
-    var qty = getQty(r);
-    var isPaid = !!r.pagado;
 
-    // Header band
-    doc.setFillColor(6, 10, 16);
-    doc.rect(0, 0, pageW, 28, 'F');
-    doc.setTextColor(0, 212, 255);
-    doc.setFontSize(16);
-    doc.setFont('helvetica', 'bold');
-    doc.text('COMPROBANTE DE CORTE', pageW / 2, 12, { align: 'center' });
-    doc.setFontSize(10);
-    doc.setTextColor(180, 200, 220);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Mi Producción', pageW / 2, 20, { align: 'center' });
-    y = 36;
+    return getPhotoSize(r.foto).then(function (size) {
+      var doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      var pageW = doc.internal.pageSize.getWidth();
+      var margin = 16;
+      var y = 16;
+      var contentW = pageW - margin * 2;
+      var qty = getQty(r);
+      var isPaid = !!r.pagado;
+      var cols = r.colores || [];
+      var isPortrait = size && size.h >= size.w; // parada = vertical
+      var isLandscape = size && size.w > size.h; // echada = horizontal
 
-    // Photo — large, ~half page emphasis
-    if (r.foto) {
-      try {
-        var imgH = 110;
-        var imgW = contentW;
+      // Header
+      doc.setFillColor(6, 10, 16);
+      doc.rect(0, 0, pageW, 26, 'F');
+      doc.setTextColor(0, 212, 255);
+      doc.setFontSize(15);
+      doc.setFont('helvetica', 'bold');
+      doc.text('COMPROBANTE DE CORTE', pageW / 2, 11, { align: 'center' });
+      doc.setFontSize(9);
+      doc.setTextColor(180, 200, 220);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Mi Producción', pageW / 2, 18, { align: 'center' });
+      y = 32;
+
+      function drawTotalBox(x, y0, w) {
+        doc.setFillColor(0, 180, 160);
+        doc.roundedRect(x, y0, w, 28, 3, 3, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('TOTAL DE PRENDAS', x + w / 2, y0 + 10, { align: 'center' });
+        doc.setFontSize(18);
+        doc.text(String(qty) + (qty === 1 ? ' pieza' : ' piezas'), x + w / 2, y0 + 22, { align: 'center' });
+        return y0 + 32;
+      }
+
+      function drawTextBlock(x, y0, maxW) {
+        var yy = y0;
+        doc.setTextColor(20, 30, 50);
+        doc.setFontSize(13);
+        doc.setFont('helvetica', 'bold');
+        var descLines = doc.splitTextToSize(r.descripcion || 'Sin descripción', maxW);
+        doc.text(descLines, x, yy);
+        yy += descLines.length * 6 + 3;
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(80, 100, 120);
+        var fechaTxt = 'Fecha: ' + formatDate(r.fechaInicio);
+        if (r.fechaFin) fechaTxt += ' → ' + formatDate(r.fechaFin);
+        var fechaLines = doc.splitTextToSize(fechaTxt, maxW);
+        doc.text(fechaLines, x, yy);
+        yy += fechaLines.length * 5 + 4;
+
+        yy = drawTotalBox(x, yy, maxW);
+        yy += 2;
+
+        if (cols.length) {
+          doc.setTextColor(20, 30, 50);
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Detalle por color', x, yy);
+          yy += 6;
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          for (var i = 0; i < cols.length; i++) {
+            var c = cols[i];
+            doc.setTextColor(40, 50, 70);
+            var line = '•  ' + (c.nombre || 'Color') + '  ×  ' + c.cantidad;
+            var cl = doc.splitTextToSize(line, maxW);
+            doc.text(cl, x, yy);
+            yy += cl.length * 5;
+            if (yy > 270) { doc.addPage(); yy = 20; }
+          }
+          yy += 3;
+        }
+
+        doc.setFontSize(9);
+        if (isPaid) {
+          doc.setTextColor(34, 211, 160);
+          doc.text('Estado: ✓ COBRADO', x, yy);
+        } else {
+          doc.setTextColor(245, 166, 35);
+          doc.text('Estado: POR COBRAR', x, yy);
+        }
+        yy += 6;
+
+        if (r.notas) {
+          doc.setTextColor(80, 100, 120);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          var noteLines = doc.splitTextToSize('Notas: ' + r.notas, maxW);
+          doc.text(noteLines, x, yy);
+          yy += noteLines.length * 4.5 + 2;
+        }
+        return yy;
+      }
+
+      function drawPhoto(x, y0, boxW, boxH, natW, natH) {
+        var fitted = fitImage(natW, natH, boxW, boxH);
+        // centrar dentro del box
+        var ox = x + (boxW - fitted.w) / 2;
+        var oy = y0 + (boxH - fitted.h) / 2;
         doc.setDrawColor(28, 43, 66);
         doc.setFillColor(15, 24, 40);
-        doc.roundedRect(margin - 2, y - 2, contentW + 4, imgH + 4, 3, 3, 'FD');
-        doc.addImage(r.foto, 'JPEG', margin, y, imgW, imgH);
-        y += imgH + 12;
-      } catch (e) {
-        y += 4;
+        doc.roundedRect(x - 1, y0 - 1, boxW + 2, boxH + 2, 2, 2, 'FD');
+        try {
+          doc.addImage(r.foto, 'JPEG', ox, oy, fitted.w, fitted.h);
+        } catch (e1) {
+          try { doc.addImage(r.foto, 'PNG', ox, oy, fitted.w, fitted.h); } catch (e2) {}
+        }
+        return y0 + boxH;
       }
-    } else {
-      doc.setFillColor(15, 24, 40);
-      doc.roundedRect(margin, y, contentW, 40, 3, 3, 'F');
-      doc.setTextColor(100, 120, 140);
-      doc.setFontSize(12);
-      doc.text('Sin foto', pageW / 2, y + 22, { align: 'center' });
-      y += 48;
-    }
 
-    // Description
-    doc.setTextColor(20, 30, 50);
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    var descLines = doc.splitTextToSize(r.descripcion || 'Sin descripción', contentW);
-    doc.text(descLines, margin, y);
-    y += descLines.length * 7 + 4;
-
-    // Dates
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(80, 100, 120);
-    var fechaTxt = 'Fecha: ' + formatDate(r.fechaInicio);
-    if (r.fechaFin) fechaTxt += '  →  ' + formatDate(r.fechaFin);
-    doc.text(fechaTxt, margin, y);
-    y += 10;
-
-    // TOTAL PRENDAS — único total destacado (sin montos)
-    doc.setFillColor(0, 180, 160);
-    doc.roundedRect(margin, y, contentW, 32, 4, 4, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('TOTAL DE PRENDAS', pageW / 2, y + 11, { align: 'center' });
-    doc.setFontSize(24);
-    doc.text(String(qty) + (qty === 1 ? ' pieza' : ' piezas'), pageW / 2, y + 25, { align: 'center' });
-    y += 42;
-
-    // Colores (solo cantidades, sin precios)
-    var cols = r.colores || [];
-    if (cols.length) {
-      doc.setTextColor(20, 30, 50);
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Detalle por color', margin, y);
-      y += 7;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      for (var i = 0; i < cols.length; i++) {
-        var c = cols[i];
-        doc.setTextColor(40, 50, 70);
-        doc.text('•  ' + (c.nombre || 'Color') + '  ×  ' + c.cantidad, margin + 2, y);
-        y += 6;
-        if (y > 270) { doc.addPage(); y = 20; }
+      if (r.foto && size && isPortrait) {
+        // Foto vertical (parada): 2 columnas — foto izq, texto der
+        var gap = 6;
+        var photoColW = contentW * 0.48;
+        var textColW = contentW - photoColW - gap;
+        var photoColH = 120; // alto del área de foto
+        var fittedP = fitImage(size.w, size.h, photoColW, photoColH);
+        // Usar la altura real de la foto ajustada (sin estirar el box de más)
+        var usedH = Math.max(fittedP.h, 70);
+        drawPhoto(margin, y, photoColW, usedH, size.w, size.h);
+        drawTextBlock(margin + photoColW + gap, y + 2, textColW);
+        y = Math.max(y + usedH + 10, y + 90);
+      } else if (r.foto && size && isLandscape) {
+        // Foto horizontal (echada): foto arriba, texto abajo — sin deformar
+        var maxPhotoH = 95;
+        var fittedL = fitImage(size.w, size.h, contentW, maxPhotoH);
+        // centrar horizontalmente
+        var lx = margin + (contentW - fittedL.w) / 2;
+        doc.setDrawColor(28, 43, 66);
+        doc.setFillColor(15, 24, 40);
+        doc.roundedRect(lx - 1, y - 1, fittedL.w + 2, fittedL.h + 2, 2, 2, 'FD');
+        try {
+          doc.addImage(r.foto, 'JPEG', lx, y, fittedL.w, fittedL.h);
+        } catch (e3) {
+          try { doc.addImage(r.foto, 'PNG', lx, y, fittedL.w, fittedL.h); } catch (e4) {}
+        }
+        y += fittedL.h + 10;
+        y = drawTextBlock(margin, y, contentW);
+      } else if (r.foto && size) {
+        // Cuadrada o fallback: arriba/abajo sin deformar
+        var maxH2 = 100;
+        var fitted2 = fitImage(size.w, size.h, contentW, maxH2);
+        var cx = margin + (contentW - fitted2.w) / 2;
+        doc.setDrawColor(28, 43, 66);
+        doc.setFillColor(15, 24, 40);
+        doc.roundedRect(cx - 1, y - 1, fitted2.w + 2, fitted2.h + 2, 2, 2, 'FD');
+        try {
+          doc.addImage(r.foto, 'JPEG', cx, y, fitted2.w, fitted2.h);
+        } catch (e5) {}
+        y += fitted2.h + 10;
+        y = drawTextBlock(margin, y, contentW);
+      } else if (r.foto) {
+        // No se pudo medir: layout vertical sin forzar proporción
+        var fallbackH = 90;
+        doc.setDrawColor(28, 43, 66);
+        doc.setFillColor(15, 24, 40);
+        doc.roundedRect(margin - 1, y - 1, contentW + 2, fallbackH + 2, 2, 2, 'FD');
+        try {
+          doc.addImage(r.foto, 'JPEG', margin, y, contentW, fallbackH);
+        } catch (e6) {}
+        y += fallbackH + 10;
+        y = drawTextBlock(margin, y, contentW);
+      } else {
+        doc.setFillColor(15, 24, 40);
+        doc.roundedRect(margin, y, contentW, 28, 3, 3, 'F');
+        doc.setTextColor(100, 120, 140);
+        doc.setFontSize(11);
+        doc.text('Sin foto', pageW / 2, y + 16, { align: 'center' });
+        y += 36;
+        y = drawTextBlock(margin, y, contentW);
       }
-      y += 6;
-    }
 
-    // Estado (sin montos)
-    doc.setFontSize(10);
-    if (isPaid) {
-      doc.setTextColor(34, 211, 160);
-      doc.text('Estado: ✓ COBRADO', margin, y);
-    } else {
-      doc.setTextColor(245, 166, 35);
-      doc.text('Estado: POR COBRAR', margin, y);
-    }
-    y += 8;
+      // Footer
+      doc.setDrawColor(200, 210, 220);
+      doc.line(margin, 285, pageW - margin, 285);
+      doc.setTextColor(140, 155, 175);
+      doc.setFontSize(8);
+      doc.text('Generado el ' + new Date().toLocaleString('es-BR') + ' · Mi Producción', pageW / 2, 292, { align: 'center' });
 
-    // Notas
-    if (r.notas) {
-      doc.setTextColor(80, 100, 120);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      var noteLines = doc.splitTextToSize('Notas: ' + r.notas, contentW);
-      doc.text(noteLines, margin, y);
-      y += noteLines.length * 5 + 4;
-    }
-
-    // Footer
-    doc.setDrawColor(200, 210, 220);
-    doc.line(margin, 285, pageW - margin, 285);
-    doc.setTextColor(140, 155, 175);
-    doc.setFontSize(8);
-    doc.text('Generado el ' + new Date().toLocaleString('es-BR') + ' · Mi Producción', pageW / 2, 292, { align: 'center' });
-
-    return doc;
+      return doc;
+    });
   }
 
   function downloadPdf() {
     var r = findRegistro(shareRegistroId);
     if (!r) { showToast('Registro no encontrado'); return; }
-    var doc = buildPdfDoc(r);
-    if (!doc) return;
-    var name = 'comprobante-' + (r.descripcion || 'corte').replace(/[^\w\-]+/g, '_').slice(0, 30) + '.pdf';
-    doc.save(name);
-    showToast('PDF descargado ✓');
-    closeShareModal();
+    showToast('Generando PDF…');
+    buildPdfDoc(r).then(function (doc) {
+      if (!doc) return;
+      var name = 'comprobante-' + (r.descripcion || 'corte').replace(/[^\w\-]+/g, '_').slice(0, 30) + '.pdf';
+      doc.save(name);
+      showToast('PDF descargado ✓');
+      closeShareModal();
+    });
   }
 
   function sharePdfWhatsApp() {
     var r = findRegistro(shareRegistroId);
     if (!r) { showToast('Registro no encontrado'); return; }
-    var doc = buildPdfDoc(r);
-    if (!doc) return;
+    showToast('Generando PDF…');
+    buildPdfDoc(r).then(function (doc) {
+      if (!doc) return;
 
-    var blob = doc.output('blob');
-    var fileName = 'comprobante-' + (r.descripcion || 'corte').replace(/[^\w\-]+/g, '_').slice(0, 30) + '.pdf';
-    var file = new File([blob], fileName, { type: 'application/pdf' });
-    var qty = getQty(r);
-    var texto = 'Comprobante de corte:\n' +
-      (r.descripcion || '') + '\n' +
-      qty + (qty === 1 ? ' prenda' : ' prendas') + '\n' +
-      (r.pagado ? '✓ Cobrado' : 'Por cobrar');
+      var blob = doc.output('blob');
+      var fileName = 'comprobante-' + (r.descripcion || 'corte').replace(/[^\w\-]+/g, '_').slice(0, 30) + '.pdf';
+      var file = new File([blob], fileName, { type: 'application/pdf' });
+      var qty = getQty(r);
+      var texto = 'Comprobante de corte:\n' +
+        (r.descripcion || '') + '\n' +
+        qty + (qty === 1 ? ' prenda' : ' prendas') + '\n' +
+        (r.pagado ? '✓ Cobrado' : 'Por cobrar');
 
-    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-      navigator.share({
-        title: 'Comprobante de corte',
-        text: texto,
-        files: [file]
-      }).then(function () {
-        showToast('Compartido ✓');
-        closeShareModal();
-      }).catch(function () {
-        // fallback
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({
+          title: 'Comprobante de corte',
+          text: texto,
+          files: [file]
+        }).then(function () {
+          showToast('Compartido ✓');
+          closeShareModal();
+        }).catch(function () {
+          fallbackWaShare(blob, fileName, texto);
+        });
+      } else {
         fallbackWaShare(blob, fileName, texto);
-      });
-    } else {
-      fallbackWaShare(blob, fileName, texto);
-    }
+      }
+    });
   }
 
   function fallbackWaShare(blob, fileName, texto) {
